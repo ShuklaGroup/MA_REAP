@@ -1,6 +1,6 @@
 import pickle
+
 import numpy as np
-from matplotlib import pyplot as plt
 import pyemma
 
 
@@ -8,9 +8,11 @@ def save_pickle(obj, filename):
     with open(filename, 'wb') as output:
         pickle.dump(obj, output)
 
+
 def load_pickle(filename):
     with open(filename, 'rb') as infile:
         return pickle.load(infile)
+
 
 def msm_from_mtx(transition_matrix, dt_model='5 ns'):
     '''
@@ -31,6 +33,7 @@ def msm_from_mtx(transition_matrix, dt_model='5 ns'):
     P = np.asarray(transition_matrix.todense())
     return pyemma.msm.markov_model(P, dt_model=dt_model)
 
+
 def run_monte_carlo_traj(msm, init_state=0, n_steps=50):
     '''
     Run a short Monte Carlo simulation starting on state `init_state` for `n_steps` under Markov state model `msm`.
@@ -46,6 +49,7 @@ def run_monte_carlo_traj(msm, init_state=0, n_steps=50):
     trajectory (numpy.ndarray): trajectory of shape (n_steps,). The state trajectory.
     '''
     return msm.simulate(n_steps, start=init_state)
+
 
 def map_state_to_coordinates(state_index_map, state_coordinates):
     '''
@@ -64,14 +68,15 @@ def map_state_to_coordinates(state_index_map, state_coordinates):
     -------------
     sequence_coordinates (np.ndarray): array of shape (traj_len, n_collective_variables). Sequence of points in collective varaible space.
     '''
-    
+
     def mapping(sequence_states):
         full_msm_indexes = state_index_map[sequence_states]
         sequence_coordinates = state_coordinates[full_msm_indexes]
-        
+
         return sequence_coordinates
-    
+
     return mapping
+
 
 def num_clusters(sequence_coordinates):
     '''
@@ -80,6 +85,7 @@ def num_clusters(sequence_coordinates):
     For kinetic MC simulations, the number of clusters will equal the number of states discovered.
     '''
     return len(np.unique(sequence_coordinates))
+
 
 def spawn_trajectories_MA(state_sequences, msm, chosen_frames, executors, seed=None, traj_len=500, potential=''):
     '''
@@ -96,9 +102,9 @@ def spawn_trajectories_MA(state_sequences, msm, chosen_frames, executors, seed=N
     -------------
     state_sequences (list[list[np.ndarray]]): trajectories collected so far (in terms of MSM states).
     '''
-    
+
     for init_state, agent in zip(chosen_frames, executors):
         new_traj = run_monte_carlo_traj(msm, init_state=init_state, n_steps=traj_len)
         state_sequences[agent].append(new_traj)
-        
+
     return state_sequences

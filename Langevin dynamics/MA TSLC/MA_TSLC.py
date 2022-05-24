@@ -1,14 +1,14 @@
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-import openmm as mm
-from utils import save_pickle, load_pickle, plot_potential, run_trajectory, setup_simulation, area_explored
-from sklearn.cluster import KMeans
-from sklearn.metrics import pairwise_distances_argmin_min
-from sklearn.decomposition import PCA
 from collections import Counter
-from scipy.optimize import minimize
-from scipy.spatial.distance import cdist, pdist, squareform
+
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.spatial.distance import pdist, squareform
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances_argmin_min
+from utils import save_pickle, run_trajectory, area_explored
+
 
 def define_colvars(trajectory):
     '''
@@ -23,13 +23,14 @@ def define_colvars(trajectory):
     -------------
     colvar_traj (np.ndarray): trajectory in collective variables space of shape (n_frames, 4).
     '''
-    
-    colvar = np.arctan2(trajectory[:,1], trajectory[:,0])
-    colvar[colvar < 0] += 2*np.pi
+
+    colvar = np.arctan2(trajectory[:, 1], trajectory[:, 0])
+    colvar[colvar < 0] += 2 * np.pi
     covlar = np.degrees(colvar)
     colvar_traj = np.append(trajectory, colvar.reshape(-1, 1), axis=1)
-    
+
     return colvar_traj
+
 
 def define_colvars_grad(point):
     '''
@@ -44,13 +45,14 @@ def define_colvars_grad(point):
     grad (np.ndarray): gradient in collective variables space of shape (3, 4).
     '''
     x, y, z = point
-    dx = np.asarray([1, 0, 0, -y/(x**2 + y**2)])
-    dy = np.asarray([0, 1, 0, x/(x**2 + y**2)])
+    dx = np.asarray([1, 0, 0, -y / (x ** 2 + y ** 2)])
+    dy = np.asarray([0, 1, 0, x / (x ** 2 + y ** 2)])
     dz = np.asarray([0, 0, 1, 0])
-    
+
     grad = np.vstack([dx, dy, dz])
-    
+
     return grad
+
 
 def principal_components(points, d=None):
     '''
@@ -69,10 +71,12 @@ def principal_components(points, d=None):
     '''
     pca = PCA(n_components=d)
     pca_trans = pca.fit(points)
-    
+
     return pca_trans.components_
 
-def clustering_MA_FFT(trajectories, n_agents, n_select, n_clusters=None, stakes_method='percentage', stakes_k=None, max_frames=None, b=1e-4, gamma=0.7, d=None, l=2):
+
+def clustering_MA_FFT(trajectories, n_agents, n_select, n_clusters=None, stakes_method='percentage', stakes_k=None,
+                      max_frames=None, b=1e-4, gamma=0.7, d=None, l=2):
     '''
     Clusters all (or a representative subset) of the frames in trajectories using Fastest First Traversal. 
     Returns clustering object, which will be used to select the least counts clusters. The agents that 
@@ -108,31 +112,31 @@ def clustering_MA_FFT(trajectories, n_agents, n_select, n_clusters=None, stakes_
     Vis (list[np.ndarrays]): list of Vi matrices. Order is identical to indexing of clusters.
     agent_stakes (np.ndarray): array of shape (n_agents, n_clusters). Entry agent_stakes[i, j] indicates the stakes that agent i has on cluster j.
     '''
-    
+
     # Put frames in format that is usable for KMeans
-    assert(n_agents == len(trajectories))
+    assert (n_agents == len(trajectories))
     total_frames = 0
-    trajectory = [] # All frames
-    agent_index = [] # Array mapping a frame index in trajectory to its corresponding agent
+    trajectory = []  # All frames
+    agent_index = []  # Array mapping a frame index in trajectory to its corresponding agent
     for a, agent_trajs in enumerate(trajectories):
         for traj in agent_trajs:
             total_frames += len(traj)
             trajectory.append(traj)
-            agent_index.extend([a]*len(traj))
-          
+            agent_index.extend([a] * len(traj))
+
     trajectory = np.concatenate(trajectory)
     agent_index = np.asarray(agent_index)
     colvar_traj = define_colvars(trajectory)
-    
-    assert(len(agent_index) == len(trajectory))
-    
+
+    assert (len(agent_index) == len(trajectory))
+
     # Downsample number of points
     if (not max_frames) or (total_frames <= max_frames):
         X = trajectory
         X_colvar = colvar_traj
         agent_idx = agent_index
         max_frames = total_frames
-    
+
     elif total_frames > max_frames:
         max_frames = int(max_frames)
         rng = np.random.default_rng()
@@ -140,54 +144,55 @@ def clustering_MA_FFT(trajectories, n_agents, n_select, n_clusters=None, stakes_
         X = trajectory[rand_indices]
         X_colvar = colvar_traj[rand_indices]
         agent_idx = agent_index[rand_indices]
-                                  
+
     # Use heuristic from https://openreview.net/pdf?id=00thAjcutwh to determine number of clusters
     if (n_clusters is None):
-        n_clusters = int(b*(max_frames**(gamma*d)))
-    if (n_clusters < n_select): # At least enough clusters to launch trajectories
+        n_clusters = int(b * (max_frames ** (gamma * d)))
+    if (n_clusters < n_select):  # At least enough clusters to launch trajectories
         n_clusters = n_select
-    
+
     # First clustering attempt using FFT
     centroids = _FFT_helper(X_colvar, n_clusters, l=l)
     kmeans = KMeans(n_clusters=n_clusters, n_init=1, max_iter=1, init=centroids).fit(X_colvar)
-    
+
     # If first attempt fails, repeat until convergence is reached
     while len(np.unique(kmeans.labels_)) != n_clusters:
         centroids = _FFT_helper(X_colvar, n_clusters, l=l)
         kmeans = KMeans(n_clusters=n_clusters, n_init=1, max_iter=1, init=centroids).fit(X_colvar)
-    
+
     # Used to compute Gis, Vis, and agent stakes
     # Gis
     central_frames_indices, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_colvar)
     central_frames = X[central_frames_indices]
     Gis = compute_Gi_all_clusters(central_frames)
-    
+
     # Vis
     Vis = compute_Vi_all_clusters(kmeans, X, d)
-    
+
     # Agent stakes
     agent_stakes = compute_agent_stakes(kmeans, agent_idx, n_agents, method=stakes_method, k=stakes_k)
     return kmeans, X, X_colvar, agent_idx, Gis, Vis, agent_stakes
+
 
 def _FFT_helper(X_colvar, n_clusters, l=2):
     '''
     Helper for clustering_MA_FFT function. Code based on implementation by James Buenfil et al.
     '''
-    n_clusters_prime = int(n_clusters*np.log(n_clusters) + l)
+    n_clusters_prime = int(n_clusters * np.log(n_clusters) + l)
     rng = np.random.default_rng()
     rand_indices = rng.choice(len(X_colvar), n_clusters_prime, replace=False)
     init_points = X_colvar[rand_indices]
- 
-    mu_1 = 0 # Choosing first one is the same as picking at random
-    mus = [ mu_1 ]
-    available_mus = [ i for i in range(1, n_clusters_prime) ]
-   
-    D = squareform(pdist(init_points)) # Euclidean norm distance matrix
-    np.fill_diagonal(D, np.inf) 
- 
+
+    mu_1 = 0  # Choosing first one is the same as picking at random
+    mus = [mu_1]
+    available_mus = [i for i in range(1, n_clusters_prime)]
+
+    D = squareform(pdist(init_points))  # Euclidean norm distance matrix
+    np.fill_diagonal(D, np.inf)
+
     #### TODO: Vectorize highest minimum search ####
     for _ in range(1, n_clusters):
-        #an index corresponding to max min distance point so far
+        # an index corresponding to max min distance point so far
         max_sofar = available_mus[0]
         min_dist = np.amin(D[max_sofar, np.asarray(mus)])
 
@@ -198,8 +203,9 @@ def _FFT_helper(X_colvar, n_clusters, l=2):
         available_mus.remove(max_sofar)
         mus.append(max_sofar)
     mus = np.asarray(mus)
-    
+
     return X_colvar[rand_indices[mus]]
+
 
 def select_least_counts_MA(kmeans, X, X_colvar, n_select=50):
     '''
@@ -218,17 +224,18 @@ def select_least_counts_MA(kmeans, X, X_colvar, n_select=50):
     central_frames (np.ndarray): array of shape (n_select, D). Frames in X that are closest to the center of each candidate.
     central_frames_indices (np.ndarray): array of shape (n_select,). Indices of the frames in X that are closest to the center of each candidate.
     '''
-    
+
     # Select n_select candidates via least counts
     counts = Counter(kmeans.labels_)
-    least_counts = np.asarray(counts.most_common()[::-1][:n_select])[:,0] # Which clusters contain lowest populations
+    least_counts = np.asarray(counts.most_common()[::-1][:n_select])[:, 0]  # Which clusters contain lowest populations
     candidate_indices = least_counts
     # Find frames closest to cluster centers of candidates
     least_counts_centers = kmeans.cluster_centers_[least_counts]
     central_frames_indices, _ = pairwise_distances_argmin_min(least_counts_centers, X_colvar)
     central_frames = X[central_frames_indices]
-    
+
     return candidate_indices, central_frames, central_frames_indices
+
 
 def compute_Vi_all_clusters(kmeans, X, d):
     '''
@@ -249,9 +256,10 @@ def compute_Vi_all_clusters(kmeans, X, d):
     for i in range(kmeans.n_clusters):
         instances = np.where(kmeans.labels_ == i)
         points = X[instances]
-        Vi = principal_components(points, d=d).T # Must transpose to get desired shape
+        Vi = principal_components(points, d=d).T  # Must transpose to get desired shape
         Vis.append(Vi)
     return Vis
+
 
 def compute_Gi_all_clusters(central_frames):
     '''
@@ -269,19 +277,20 @@ def compute_Gi_all_clusters(central_frames):
     Gis (list[np.ndarrays]): list of Gi matrices. Order is identical to order of candidate_indices.
     '''
     Gis = []
-    n = len(central_frames) # Same as n_select
+    n = len(central_frames)  # Same as n_select
     norm = 0
     for central_frame in central_frames:
         Gi = define_colvars_grad(central_frame)
         norm += np.linalg.norm(Gi, axis=0)
         Gis.append(Gi)
-    
+
     # Scale each vector according to the average norm
     normed_Gis = []
     for Gi in Gis:
-        normed_Gis.append(Gi*n/norm)
-    
+        normed_Gis.append(Gi * n / norm)
+
     return normed_Gis
+
 
 def compute_agent_stakes(kmeans, agent_indices, n_agents, method='percentage', k=None):
     '''
@@ -303,56 +312,59 @@ def compute_agent_stakes(kmeans, agent_indices, n_agents, method='percentage', k
     -------------
     agent_stakes (np.ndarray): array of shape (n_agents, n_clusters). Entry agent_stakes[i, j] indicates the stakes that agent i has on cluster j.
     '''
-    if (method=="logistic"):
-        try: 
-            assert(k is not None)
+    if (method == "logistic"):
+        try:
+            assert (k is not None)
         except AssertionError as err:
             raise AssertionError("k parameter must be set if using method='logistic'") from err
-    
+
     stakes = np.zeros((n_agents, kmeans.n_clusters))
     for i in range(kmeans.n_clusters):
         stakes_cluster = np.zeros(n_agents)
         agent_idx = agent_indices[np.where(kmeans.labels_ == i)]
         agent_indices_count = Counter(agent_idx)
         total = sum(agent_indices_count.values())
-        
+
         for agent, count in agent_indices_count.most_common():
-            stakes_cluster[agent] = count/total
-    
-        if (method=="percentage"):
+            stakes_cluster[agent] = count / total
+
+        if (method == "percentage"):
             stakes[:, i] = stakes_cluster
 
-        elif (method=="logistic"):
+        elif (method == "logistic"):
             x0 = 0.5
-            logistic_fun = lambda x: 1/(1 + np.exp(-k*(x-x0)))
+            logistic_fun = lambda x: 1 / (1 + np.exp(-k * (x - x0)))
 
             stakes_transformed = logistic_fun(stakes_cluster)
-            stakes_transformed[np.where(stakes_cluster < 1e-18)] = 0 # Make sure that the function evaluates to 0 at x=0
-            stakes_transformed /= stakes_transformed.sum() # Re-normalize
+            stakes_transformed[
+                np.where(stakes_cluster < 1e-18)] = 0  # Make sure that the function evaluates to 0 at x=0
+            stakes_transformed /= stakes_transformed.sum()  # Re-normalize
             stakes[:, i] = stakes_transformed
 
-        elif (method=="equal"):
-            stakes_cluster[np.where(stakes_cluster!=0)] = 1/np.count_nonzero(stakes_cluster)
+        elif (method == "equal"):
+            stakes_cluster[np.where(stakes_cluster != 0)] = 1 / np.count_nonzero(stakes_cluster)
             stakes[:, i] = stakes_cluster
 
-        elif (method=="max"):
+        elif (method == "max"):
             # If two or more agents have the same number of frames (and these are equal to the maximum), one of them is picked arbitrarily to get stakes 1
             stakes_cluster[np.argmax(stakes_cluster)] = 1
             stakes_cluster[np.where(stakes_cluster < 1)] = 0
             stakes[:, i] = stakes_cluster
-            
-        else:
-            raise ValueError("Method "+method+" not understood. Must choose 'percentage', 'max', 'equal', or 'logistic'.") 
 
-        try: 
-            assert(np.abs(stakes[:, i].sum()-1) < 1e-6)
+        else:
+            raise ValueError(
+                "Method " + method + " not understood. Must choose 'percentage', 'max', 'equal', or 'logistic'.")
+
+        try:
+            assert (np.abs(stakes[:, i].sum() - 1) < 1e-6)
         except AssertionError as err:
             print("Stakes:", stakes)
             print("Method:", method)
             print("Agent indices:", agent_indices)
             raise AssertionError() from err
-        
+
     return stakes
+
 
 def compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a, weights_a, n_select):
     '''
@@ -374,23 +386,24 @@ def compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a
     '''
     # Initialize array
     rewards = np.empty(n_select)
-    
+
     # Convert frames to colvar space
     X_a_colvar = define_colvars(X_a)
     central_frames_colvar = define_colvars(central_frames)
-    
+
     # Compute distribution parameters for frames observed by the agent
     mu = X_a_colvar.mean(axis=0)
     sigma = X_a_colvar.std(axis=0)
-    
+
     # Compute distance of each candidate to the mean
-    distances = (weights_a*np.abs(central_frames_colvar - mu)/sigma).sum(axis=1) # Shape is (n_select,)
+    distances = (weights_a * np.abs(central_frames_colvar - mu) / sigma).sum(axis=1)  # Shape is (n_select,)
 
     # Compute rewards
     # Since stakes_a is zero for those clusters that do not involve agent a, rewards are accurately set to zero here.
-    rewards = stakes_a*distances
-    
+    rewards = stakes_a * distances
+
     return rewards
+
 
 def get_weights(Vis, Gis, agent_stakes, which_agent):
     '''
@@ -408,24 +421,26 @@ def get_weights(Vis, Gis, agent_stakes, which_agent):
     -------------
     weights_a (np.ndarray): array of shape (n_features,). Weights that the given agent assigns to each order parameter.
     '''
-    assert(len(Vis) == len(Gis) == len(agent_stakes[which_agent]))
+    assert (len(Vis) == len(Gis) == len(agent_stakes[which_agent]))
     K = Gis[0].shape[1]
-    
+
     A = np.zeros((K, K))
-    
+
     for i, s in enumerate(agent_stakes[which_agent]):
         Gi = Gis[i]
         Vi = Vis[i]
-        A += s*(Gi.T@Vi)@(Vi.T@Gi)
-    
+        A += s * (Gi.T @ Vi) @ (Vi.T @ Gi)
+
     eig_vals, eig_vecs = np.linalg.eig(A)
     idx = np.argmax(eig_vals)
-    
-    weights_a = eig_vecs[:, idx]**2
-    
+
+    weights_a = eig_vecs[:, idx] ** 2
+
     return np.real_if_close(weights_a, tol=1e5)
 
-def select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, agent_stakes, weights, n_agents, n_chosen=10, collaborative=True, competitive=False):
+
+def select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, agent_stakes, weights, n_agents,
+                                                 n_chosen=10, collaborative=True, competitive=False):
     '''
     Select starting positions for new simulations. Here, the collective rewards are computed as the sum of the rewards from each agent.
     
@@ -449,10 +464,10 @@ def select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, a
     chosen_frames (np.ndarray): array of shape (n_chosen, D). Frames from which to launch new trajectories.
     executors (np.ndarray): array of shape (n_chosen,). Index of the agent that launches each trajectory.
     '''
-    
+
     # Compute collective rewards for each candidate with the updated weights
     n_select = len(central_frames)
-    
+
     if collaborative:
         rewards = np.zeros(n_select)
         for a in range(n_agents):
@@ -462,7 +477,8 @@ def select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, a
 
             indices = np.where(agent_idx == a)
             X_a = X[indices]
-            rewards += compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a, weights_a, n_select)
+            rewards += compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a, weights_a,
+                                                                      n_select)
     else:
         rewards_agent = np.zeros((n_agents, n_select))
         for a in range(n_agents):
@@ -472,21 +488,23 @@ def select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, a
 
             indices = np.where(agent_idx == a)
             X_a = X[indices]
-            rewards_agent[a] = compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a, weights_a, n_select)
-        
+            rewards_agent[a] = compute_structure_reward_MA_standard_Euclidean(X_a, central_frames, stakes_a, weights_a,
+                                                                              n_select)
+
         rewards_max = np.max(rewards_agent, axis=0)
-        
+
         if competitive:
-            rewards = 2*rewards_max - np.sum(rewards_agent, axis=0)
+            rewards = 2 * rewards_max - np.sum(rewards_agent, axis=0)
         else:
             rewards = rewards_max
-    
-    assert(len(rewards) == n_select)
-    indices = np.argsort(rewards)[-n_chosen:][::-1] # Indices of frames with maximum reward
-    chosen_frames = central_frames[indices] # Frames that will be used to start new simulations
-    executors = agent_stakes.argmax(axis=0)[indices] # Agents that will run the new trajectories 
-    
+
+    assert (len(rewards) == n_select)
+    indices = np.argsort(rewards)[-n_chosen:][::-1]  # Indices of frames with maximum reward
+    chosen_frames = central_frames[indices]  # Frames that will be used to start new simulations
+    executors = agent_stakes.argmax(axis=0)[indices]  # Agents that will run the new trajectories
+
     return chosen_frames, executors
+
 
 def spawn_trajectories_MA(trajectories, chosen_frames, executors, seed=None, traj_len=500, potential=''):
     '''
@@ -503,12 +521,13 @@ def spawn_trajectories_MA(trajectories, chosen_frames, executors, seed=None, tra
     trajectories (list[list[np.ndarray]]): trajectories collected so far (inlcuding new ones). 
         They should be accessed as trajectories[ith_agent][jth_trajectory].
     '''
-    
+
     for frame, agent in zip(chosen_frames, executors):
         new_traj = run_trajectory(n_steps=traj_len, potential=potential, initial_position=frame)
         trajectories[agent].append(new_traj)
-        
+
     return trajectories
+
 
 def collect_initial_data(num_trajectories, traj_len, potential, initial_positions, trajectories):
     '''
@@ -518,8 +537,9 @@ def collect_initial_data(num_trajectories, traj_len, potential, initial_position
         for i, initial_position in enumerate(initial_positions):
             traj = run_trajectory(n_steps=traj_len, potential=potential, initial_position=initial_position)
             trajectories[i].append(traj)
-    
+
     return trajectories
+
 
 def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix='', **kwargs):
     '''
@@ -543,8 +563,8 @@ def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix
         gamma (float): parameter to determine number of clusters (theoretically in [0.5, 1]).
         b (float): parameter to determine number of clusters.
         max_frames (int): maximum number of frames to use in clustering steps (take random subsample to accelerate testing).
-        xlim (tuple of (x_min, x_max, x_stride)): used to define grid where are exlpored will be computed. (Will be replaced in the future to accommodate arbitrary dimensions.)
-        ylim (tuple of (y_min, y_max, y_stride)): used to define grid where are exlpored will be computed. (Will be replaced in the future to accommodate arbitrary dimensions.)
+        xlim (tuple of (x_min, x_max, x_stride)): used to define grid where are explored will be computed. (Will be replaced in the future to accommodate arbitrary dimensions.)
+        ylim (tuple of (y_min, y_max, y_stride)): used to define grid where are explored will be computed. (Will be replaced in the future to accommodate arbitrary dimensions.)
         threshold (float): any area above this free energy threshold will be ignored in the computation of explored area.
         potential_func (callable): necessary to compute explored area.
         stakes_method (str): one of "percentage", "max", "equal", or "logistic". 
@@ -561,14 +581,15 @@ def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix
     None. Results are saved to output_dir.
     '''
     # Step 1: define some hyperparameters and initialize arrays --> To be provided via init_variables
-    num_spawn = kwargs['num_spawn'] # Number of trajectories spawn per epoch
-    n_select = kwargs['n_select'] # Number of least-count candidates selected per epoch
+    num_spawn = kwargs['num_spawn']  # Number of trajectories spawn per epoch
+    n_select = kwargs['n_select']  # Number of least-count candidates selected per epoch
     n_agents = kwargs['n_agents']
     traj_len = kwargs['traj_len']
-    n_features = kwargs['n_features'] # Equivalent to parameter K. Number of variables in OP space (in this case it's 4)
-    d = kwargs['d'] # Parameter to determine number of clusters (intrinsic dimensionality given by potential function)
-    gamma = kwargs['gamma'] # Parameter to determine number of clusters
-    b = kwargs['b'] # Parameter to determine number of clusters
+    n_features = kwargs[
+        'n_features']  # Equivalent to parameter K. Number of variables in OP space (in this case it's 4)
+    d = kwargs['d']  # Parameter to determine number of clusters (intrinsic dimensionality given by potential function)
+    gamma = kwargs['gamma']  # Parameter to determine number of clusters
+    b = kwargs['b']  # Parameter to determine number of clusters
     max_frames = kwargs['max_frames']
     xlim = kwargs['xlim']
     ylim = kwargs['ylim']
@@ -579,18 +600,19 @@ def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix
     stakes_k = kwargs['stakes_k']
     collaborative = kwargs['collaborative']
     competitive = kwargs['competitive']
-    
+
     # Step 2: set initial weights
-    weights = [np.ones((n_features))/n_features for _ in range(n_agents)] # The actual initial value doesn't matter here
-    
+    weights = [np.ones((n_features)) / n_features for _ in
+               range(n_agents)]  # The actual initial value doesn't matter here
+
     # Step 3: collect some initial data
     trajectories = [[] for _ in range(n_agents)]
     trajectories = collect_initial_data(num_spawn, traj_len, potential, initial_positions, trajectories)
-    
+
     # Steps 4-9: cluster, compute rewards, tune weights, run new simulations, and repeat
 
     # Logs
-    least_counts_points_log = [] # For central frames from candidates
+    least_counts_points_log = []  # For central frames from candidates
     agent_stakes_log = []
     weights_log = [[] for _ in range(n_agents)]
     individual_rewards_log = [[] for _ in range(n_agents)]
@@ -598,23 +620,28 @@ def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix
     area_log = []
     area_agents_log = [[] for _ in range(n_agents)]
     executors_log = []
-    
+
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
     for e in range(epochs):
-        print("Running epoch: {}/{}".format(e+1, epochs), end='\n')
+        print("Running epoch: {}/{}".format(e + 1, epochs), end='\n')
 
         # Clustering
-        kmeans, X, X_colvar, agent_idx, Gis, Vis, agent_stakes = clustering_MA_FFT(trajectories, n_agents, n_select, stakes_method=stakes_method, stakes_k=stakes_k, max_frames=max_frames, b=b, gamma=gamma, d=d)
+        kmeans, X, X_colvar, agent_idx, Gis, Vis, agent_stakes = clustering_MA_FFT(trajectories, n_agents, n_select,
+                                                                                   stakes_method=stakes_method,
+                                                                                   stakes_k=stakes_k,
+                                                                                   max_frames=max_frames, b=b,
+                                                                                   gamma=gamma, d=d)
 
         # Select candidates
-        candidate_indices, central_frames, central_frames_indices = select_least_counts_MA(kmeans, X, X_colvar, n_select=n_select)
+        candidate_indices, central_frames, central_frames_indices = select_least_counts_MA(kmeans, X, X_colvar,
+                                                                                           n_select=n_select)
 
         # Save logs
         least_counts_points_log.append(central_frames)
         agent_stakes_log.append(agent_stakes)
-        
+
         # Compute rewards and weights (this step is done agent-wise)
         for a in range(n_agents):
             weights[a] = get_weights(Vis, Gis, agent_stakes, a)
@@ -623,44 +650,51 @@ def run_trial(potential, initial_positions, epochs, output_dir='', output_prefix
 
             # Update logs
             weights_log[a].append(weights[a])
-        
+
         agent_stakes_candidates = agent_stakes[:, candidate_indices]
-        chosen_frames, executors = select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx, agent_stakes_candidates, weights, n_agents, n_chosen=num_spawn, collaborative=collaborative, competitive=competitive)
-        
+        chosen_frames, executors = select_starting_points_MA_standard_Euclidean(X, central_frames, agent_idx,
+                                                                                agent_stakes_candidates, weights,
+                                                                                n_agents, n_chosen=num_spawn,
+                                                                                collaborative=collaborative,
+                                                                                competitive=competitive)
+
         selected_structures_log.append(chosen_frames)
         executors_log.append(executors)
 
         trajectories = spawn_trajectories_MA(trajectories, chosen_frames, executors, potential=potential)
-        
+
         ### Compute area explored ###
-        concatenated_trajs = np.concatenate([trajectories[i][j] for i in range(n_agents) for j in range(len(trajectories[i]))])[:, :2]
+        concatenated_trajs = np.concatenate(
+            [trajectories[i][j] for i in range(n_agents) for j in range(len(trajectories[i]))])[:, :2]
         area_log.append(area_explored(potential_func, xlim, ylim, concatenated_trajs, threshold))
         color_exec = np.asarray(['black', 'white'])
         for a in range(n_agents):
             concatenated_trajs = np.concatenate([trajectories[a][j] for j in range(len(trajectories[a]))])[:, :2]
             area_agents_log[a].append(area_explored(potential_func, xlim, ylim, concatenated_trajs, threshold))
-        
-        if debug: 
-            if (e % 20 == 0) or (e+1 == epochs):
+
+        if debug:
+            if (e % 20 == 0) or (e + 1 == epochs):
                 print('Weights:')
                 for a in range(n_agents):
                     print(weights[a])
                 print('Area explored:', area_log[-1])
                 x_plot = np.arange(*xlim)
                 y_plot = np.arange(*ylim)
-                X_plot, Y_plot = np.meshgrid(x_plot, y_plot) # grid of point
-                Z_plot = potential_func(X_plot, Y_plot) # evaluation of the function on the grid
-                im = plt.imshow(Z_plot, cmap=plt.cm.jet, extent=[xlim[0], xlim[1], ylim[0], ylim[1]]) # drawing the function
-                plt.colorbar(im) # adding the colobar on the right
+                X_plot, Y_plot = np.meshgrid(x_plot, y_plot)  # grid of point
+                Z_plot = potential_func(X_plot, Y_plot)  # evaluation of the function on the grid
+                im = plt.imshow(Z_plot, cmap=plt.cm.jet,
+                                extent=[xlim[0], xlim[1], ylim[0], ylim[1]])  # drawing the function
+                plt.colorbar(im)  # adding the colobar on the right
                 for a in range(n_agents):
-                    plt.scatter(np.concatenate(trajectories[a])[::3,0], np.concatenate(trajectories[a])[::3,1], s=0.2, c='red')
-                plt.scatter(central_frames[:,0], central_frames[:,1], s=20, alpha=0.5, c=agent_stakes_candidates[0])
-                plt.scatter(chosen_frames[:,0], chosen_frames[:,1], s=1, alpha=1, c=color_exec[executors])
+                    plt.scatter(np.concatenate(trajectories[a])[::3, 0], np.concatenate(trajectories[a])[::3, 1], s=0.2,
+                                c='red')
+                plt.scatter(central_frames[:, 0], central_frames[:, 1], s=20, alpha=0.5, c=agent_stakes_candidates[0])
+                plt.scatter(chosen_frames[:, 0], chosen_frames[:, 1], s=1, alpha=1, c=color_exec[executors])
                 plt.xlim([-3, 3])
                 plt.ylim([-3, 3])
-                plt.savefig(os.path.join(output_dir, output_prefix + 'landscape_epoch_{}.png'.format(e+1)), dpi=150)
+                plt.savefig(os.path.join(output_dir, output_prefix + 'landscape_epoch_{}.png'.format(e + 1)), dpi=150)
                 plt.close()
-    
+
     ### Save results ###
     save_pickle(trajectories, os.path.join(output_dir, output_prefix + 'trajectories.pickle'))
     save_pickle(weights_log, os.path.join(output_dir, output_prefix + 'weights_log.pickle'))
