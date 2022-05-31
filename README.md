@@ -1,5 +1,5 @@
 # Multi-agent reinforcement learning-based adaptive sampling
-Code accompanying the paper:
+If you use this code, make sure to cite:
 
 (ADD CITATION)
   
