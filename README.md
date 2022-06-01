@@ -9,8 +9,8 @@ If you use this code, make sure to cite:
 	year = {2022},
 	doi = {10.1101/2022.05.31.494208},
 	publisher = {Cold Spring Harbor Laboratory},
-	URL = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208},
-	eprint = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208.full.pdf},
+	URL = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208.1},
+	eprint = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208.1.full.pdf},
 	journal = {bioRxiv}
 }
 ```
