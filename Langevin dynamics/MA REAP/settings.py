@@ -1,7 +1,5 @@
 '''
-Settings used for trials presented in paper:
-
-CITATION
+Settings used for trials presented in paper (see README)
 '''
 
 symmetric_cross = {
