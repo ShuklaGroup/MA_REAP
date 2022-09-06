@@ -2,16 +2,12 @@
 If you use this code, make sure to cite:
 
 ```BibTeX
-@article {Kleiman2022.05.31.494208,
-	author = {Kleiman, Diego E and Shukla, Diwakar},
-	title = {Multi-Agent Reinforcement Learning-based Adaptive Sampling for Conformational Sampling of Proteins},
-	elocation-id = {2022.05.31.494208},
-	year = {2022},
-	doi = {10.1101/2022.05.31.494208},
-	publisher = {Cold Spring Harbor Laboratory},
-	URL = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208.1},
-	eprint = {https://www.biorxiv.org/content/early/2022/05/31/2022.05.31.494208.1.full.pdf},
-	journal = {bioRxiv}
+@article{kleiman2022multiagent,
+  title={Multiagent Reinforcement Learning-Based Adaptive Sampling for Conformational Dynamics of Proteins},
+  author={Kleiman, Diego E and Shukla, Diwakar},
+  journal={Journal of Chemical Theory and Computation},
+  year={2022},
+  publisher={ACS Publications}
 }
 ```
   
