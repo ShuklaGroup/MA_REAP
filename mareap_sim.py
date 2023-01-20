@@ -50,25 +50,30 @@ def set_parser():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument('-r', '--reset', help="Path to MAREAP reset file (.pkl). This file is created when running the "
-                                              "script for the first time. Other settings must be left blank if the "
-                                              "reset file was already generated.")
-    parser.add_argument('-t', '--topology', help="Path to the topology file.")
-    parser.add_argument('-ft', '--format_traj', help="Format suffix for trajectory files.")
+                                              "script for the first time. Some settings are ignored if the "
+                                              "passing a reset file.")
+    parser.add_argument('-t', '--topology', help="Path to the topology file. (Ignored if passing reset file.)")
+    parser.add_argument('-ft', '--format_traj', help="Format suffix for trajectory files. (Ignored if passing reset "
+                                                     "file.)")
     parser.add_argument('-fc', '--format_coor', help="Format suffix for new input files.")
-    parser.add_argument('-fs', '--frame_stride', help="Frame stride used when featurizing trajectories.", default=1,
+    parser.add_argument('-fs', '--frame_stride', help="Frame stride used when featurizing trajectories. (Ignored if "
+                                                      "passing reset file.)", default=1,
                         type=int)
-    parser.add_argument('-d', '--delta', help="Delta parameter for MA REAP. Default: 0.05", default=0.05, type=float)
+    parser.add_argument('-d', '--delta', help="Delta parameter for MA REAP. Default: 0.05. (Ignored if passing reset "
+                                              "file.)", default=0.05, type=float)
     parser.add_argument('-w', '--weights', help="Initial feature weights for MA REAP (list of floats must add to 1). "
-                                                "Default: 1/number of features", nargs='+', type=float)
+                                                "(Ignored if passing reset file.)",
+                        nargs='+', type=float)
     parser.add_argument('-n', '--n_candidates', help="Number of least count candidates to consider.", type=int)
     parser.add_argument('-o', '--n_output', help="Number of trajectories for next round of simulations.", type=int)
     parser.add_argument('-c', '--clusters', help="Number of clusters to use (KMeans).", type=int)
-    parser.add_argument('-s', '--stakes_method', help="Method to calculate stakes. Default: percentage",
+    parser.add_argument('-s', '--stakes_method', help="Method to calculate stakes. Default: percentage. (Ignored if "
+                                                      "passing reset file.)",
                         choices=['percentage', 'equal', 'logistic'], default='percentage')
     parser.add_argument('-sk', '--stakes_k', help="k parameter when using logistic stakes. Only needs to be set when "
-                                                  "using -s logistic.")
+                                                  "using -s logistic. (Ignored if passing reset file.)", type=float)
     parser.add_argument('-reg', '--regime', help="Regime used to combine rewards from different agents. Default: "
-                                                 "collaborative",
+                                                 "collaborative. (Ignored if passing reset file.)",
                         default='collaborative', choices=['collaborative', 'noncollaborative', 'competitive'])
     return parser.parse_args()
 
@@ -96,7 +101,7 @@ def read_data():
     """
     Read feature data.
 
-    :return: list[np.ndarray], list[tuple(agent_idx, round_idx, traj_idx, clone_idx)].
+    :return: list[np.ndarray], list[tuple(agent_idx, round_idx, traj_idx, clone_idx, n_frames)].
         List of featurized trajectories and indices to map from trajectory to file.
     """
     print("Reading feature data.")
@@ -115,12 +120,12 @@ def read_data():
         for r_idx, r_dir in enumerate(round_dirs):
             traj_dirs = natsorted(glob(os.path.join(r_dir, 'traj_*')))
             n_trajs = len(traj_dirs)
-            print(f"Detected {n_trajs} trajs in {r_dir}")
+            # print(f"Detected {n_trajs} trajs in {r_dir}")
             # trajectories[-1].append([])
             for t_idx, t_dir in enumerate(traj_dirs):
                 feature_files = natsorted(glob(os.path.join(t_dir, '*.npy')))
                 n_files = len(feature_files)
-                print(f"Detected {n_files} feature files in {t_dir}")
+                # print(f"Detected {n_files} feature files in {t_dir}")
                 # trajectories[-1][-1].append([])
                 for f_idx, f_file in enumerate(feature_files):
                     feats = np.load(f_file)
@@ -160,19 +165,18 @@ def define_states_aux(central_frames_indices, frame_stride, frames_indices_map, 
     """
     Auxiliary function for define_states().
     """
-    frame_indices = np.asarray([f[3] for f in frames_indices_map])
+    frame_indices = np.asarray([f[4] for f in frames_indices_map])
     frame_index_scan = np.add.accumulate(frame_indices)
     file_indices = np.digitize(central_frames_indices, frame_index_scan)  # From frame index to file index
-
     states = []
-    for f_idx in file_indices:
-        agent_idx, round_idx, traj_idx, clone_idx = frames_indices_map[f_idx]
+    for i, f_idx in enumerate(file_indices):
+        agent_idx, round_idx, traj_idx, clone_idx, _ = frames_indices_map[f_idx]
         filepath = natsorted(glob(os.path.join(f"agent_{agent_idx}",
                                                f"round_{round_idx}",
                                                f"traj_{traj_idx}",
-                                               f"*.{format_traj}")))[clone_idx]
+                                               f"*.{format_traj}")))[clone_idx - 1]
         offset = 0 if (f_idx == 0) else frame_index_scan[f_idx - 1]
-        frame_idx = (central_frames_indices - offset) * frame_stride
+        frame_idx = (central_frames_indices[i] - offset) * frame_stride
         states.append((filepath, frame_idx))
 
     return states
@@ -210,7 +214,7 @@ def compute_stakes_aux(stakes, stakes_method, stakes_k):
     Auxiliary function for compute_stakes(). This function is only relevant when using a stakes_method other than
     'percentage'.
     """
-    temp = stakes
+    temp = stakes.copy()
 
     if stakes_method == "equal":
         for i in range(temp.shape[1]):
@@ -224,9 +228,9 @@ def compute_stakes_aux(stakes, stakes_method, stakes_k):
             return 1 / (1 + np.exp(-k * (x - x0)))
 
         for i in range(temp.shape[1]):
-            temp[:, i] = logistic_fun(stakes[:, i])
-            temp[:, i][np.where(stakes[:, i] < 1e-18)] = 0  # Evaluate to zero at x < 1e-18
-            temp[:, i] /= temp[:, i].sum()
+            temp[:, i][np.where(stakes[:, i] != 0)] = logistic_fun(stakes[:, i][np.where(stakes[:, i] != 0)])
+            # temp[:, i][np.where(stakes[:, i] < 1e-18)] = 0  # Evaluate to zero at x < 1e-18
+            temp[:, i][np.where(stakes[:, i] != 0)] /= temp[:, i][np.where(stakes[:, i] != 0)].sum()
 
     return temp
 
@@ -257,8 +261,8 @@ def compute_stakes(n_agents, n_candidates, trajectories, frames_indices_map, clu
     """
     num_frames = np.zeros((n_agents, n_candidates))
     for traj, f_idx_map in zip(trajectories, frames_indices_map):
-        agent_idx = f_idx_map[0]
-        assert (traj.shape[0] == f_idx_map[3])
+        agent_idx = f_idx_map[0] - 1
+        assert (traj.shape[0] == f_idx_map[4])
         traj_labels = cluster_obj.predict(traj)
         for clust_idx in least_counts_idx:
             num_frames[agent_idx, clust_idx] += np.count_nonzero(traj_labels == clust_idx)
@@ -294,12 +298,14 @@ def split_agent_data(trajectories, frames_indices_map, stakes, agent_idx):
     return data_agent, stakes_agent
 
 
-def compute_scores(data_agent, stakes_agent, states_feat, cv_weights_agent):
+def compute_scores(means, stdev, stakes_agent, states_feat, cv_weights_agent):
     """
     Compute rewards for a given agent.
 
-    :param data_agent: np.ndarray.
-        Concatenated frames from agent trajectories.
+    :param means: np.ndarray.
+        Vector of means for data observed by agent.
+    :param stdev: np.ndarray.
+        Vector of std deviations for data observed by agent.
     :param stakes_agent: np.ndarray.
         Stakes for the given agent.
     :param states_feat: np.ndarray.
@@ -309,16 +315,14 @@ def compute_scores(data_agent, stakes_agent, states_feat, cv_weights_agent):
     :return: np.ndarray.
         Reward values of the agent.
     """
-    means = data_agent.mean(axis=0)
-    stdev = data_agent.std(axis=0)
     epsilon = sys.float_info.epsilon
-    dist = states_feat - means
+    dist = np.abs(states_feat - means)
     distances = (cv_weights_agent * dist / (stdev + epsilon)).sum(axis=1)
 
     return stakes_agent * distances
 
 
-def set_weights(cv_weights, delta, data_agent, stakes_agent, states_feat):
+def set_weights(cv_weights, delta, means, stdev, stakes_agent, states_feat):
     """
     Find new CV weights for a given agent.
 
@@ -326,8 +330,10 @@ def set_weights(cv_weights, delta, data_agent, stakes_agent, states_feat):
         Previous weights.
     :param delta: float.
         Delta parameter (same for all agents).
-    :param data_agent: np.ndarray
-        Data for the given agent.
+    :param means: np.ndarray.
+        Vector of means for data observed by agent.
+    :param stdev: np.ndarray.
+        Vector of std deviations for data observed by agent.
     :param stakes_agent: np.ndarray
         Stakes for the given agent.
     :param states_feat: np.ndarray.
@@ -362,7 +368,7 @@ def set_weights(cv_weights, delta, data_agent, stakes_agent, states_feat):
         }]
 
     def minimize_helper(x):
-        return -compute_scores(data_agent, stakes_agent, states_feat, x).sum()
+        return -compute_scores(means, stdev, stakes_agent, states_feat, x).sum()
 
     results = minimize(minimize_helper, weights_prev, method='SLSQP', constraints=constraints)
 
@@ -407,7 +413,7 @@ def save_files(selected_states, executors, format_coor, topology, n_round, n_age
     :param selected_states: list[tuple()].
         Indices required to map selected states to source files.
     :param executors: list[int].
-        Agents that will run each new trajectory.
+        Agents that will run each new trajectory. Note executors are 0-indexed, unlike agents which are 1-indexed.
     :param format_coor: str.
         Format for new input files.
     :param topology: str.
@@ -418,12 +424,17 @@ def save_files(selected_states, executors, format_coor, topology, n_round, n_age
         Number of agents.
     :return: None.
     """
-    traj_counter = np.ones((n_agents))
+    traj_counter = np.ones((n_agents), dtype=int)
     csv_file = 'Input File, Source, Source Frame Idx\n'
+
+    # Create new round directories
+    for a in range(n_agents):
+        os.makedirs(os.path.join(f'agent_{a + 1}', f'round_{n_round + 1}'), exist_ok=True)
+
     for state, executor in zip(selected_states, executors):
         filepath, frame_idx = state
         coordinates = md.load_frame(filepath, frame_idx, top=topology)
-        outpath = os.path.join(f'agent_{executor}',
+        outpath = os.path.join(f'agent_{executor + 1}',
                                f'round_{n_round + 1}',
                                f'traj_{traj_counter[executor]}'
                                )
@@ -433,7 +444,7 @@ def save_files(selected_states, executors, format_coor, topology, n_round, n_age
         traj_counter[executor] += 1
         csv_file += f'{outpath}, {filepath}, {frame_idx}\n'
 
-    with open(f'input_states_for_round_{n_round+1}.csv', 'w') as outfile:
+    with open(f'input_states_for_round_{n_round + 1}.csv', 'w') as outfile:
         outfile.write(csv_file)
 
 
@@ -461,38 +472,51 @@ def write_reset_file(n_round, topology, format_traj, format_coor, frame_stride, 
     )
 
     with open(f'restart_file_round_{n_round}.pkl', 'wb') as outfile:
-        outfile.write(reset)
+        pickle.dump(reset, outfile)
 
 
 def main():
     parser = set_parser()
     reset_file = read_reset_file(parser.reset)
+
     if reset_file:
-        settings = reset_file
-        n_round = settings['n_round']
+        # Check that all settings can be found in reset file
+        topology = reset_file['topology']
+        format_traj = reset_file['format_traj']
+        format_coor = parser['format_coor'] if parser['format_coor'] else reset_file['format_coor']
+        frame_stride = reset_file['frame_stride']
+        delta = reset_file['delta']
+        weights = reset_file['weights']
+        n_candidates = parser['n_candidates'] if parser['n_candidates'] else reset_file['n_candidates']
+        n_output = parser['n_output'] if parser['n_output'] else reset_file['n_output']
+        clusters = parser['clusters'] if parser['clusters'] else reset_file['clusters']
+        stakes_method = reset_file['stakes_method']
+        stakes_k = reset_file['stakes_k']
+        regime = reset_file['regime']
+        n_round = reset_file['n_round']
     else:
-        settings = parser
-        # Some assertions to check user's input
-        assert (os.path.exists(settings['topology']))
-        assert (0 < settings['delta'] < 1)
-        assert (np.allclose(sum(settings['weights']), 1))
-        assert (settings['n_output'] <= settings['n_candidates'] <= settings['clusters'])
-        if settings['stakes_method'] == 'logistic':
-            assert (settings['stakes_k'] is not None)
+        # Take user inputs
+        topology = parser['topology']
+        format_traj = parser['format_traj']
+        format_coor = parser['format_coor']
+        frame_stride = parser['frame_stride']
+        delta = parser['delta']
+        weights = parser['weights']
+        n_candidates = parser['n_candidates']
+        n_output = parser['n_output']
+        clusters = parser['clusters']
+        stakes_method = parser['stakes_method']
+        stakes_k = parser['stakes_k']
+        regime = parser['regime']
         n_round = 1  # Forced
 
-    topology = settings['topology']
-    format_traj = settings['format_traj']
-    format_coor = settings['format_coor']
-    frame_stride = settings['frame_stride']
-    delta = settings['delta']
-    weights = settings['weights']
-    n_candidates = settings['n_candidates']
-    n_output = settings['n_output']
-    clusters = settings['clusters']
-    stakes_method = settings['stakes_method']
-    stakes_k = settings['stakes_k']
-    regime = settings['regime']
+        # Some assertions to check user's input
+        assert (os.path.exists(topology))
+        assert (0 < delta < 1)
+        assert (np.allclose(sum(weights), 1))
+        assert (n_output <= n_candidates <= clusters)
+        if stakes_method == 'logistic':
+            assert (stakes_k is not None)
 
     trajectories, frames_indices_map = read_data()
     n_agents = frames_indices_map[-1][0]
@@ -520,8 +544,10 @@ def main():
     scores = np.empty((n_agents, n_candidates))
     for a_idx in range(1, n_agents + 1):
         data_agent, stakes_agent = split_agent_data(trajectories, frames_indices_map, stakes, a_idx)
-        new_weights[a_idx - 1] = set_weights(prev_weights, delta, data_agent, stakes_agent, states_feat)
-        scores[a_idx - 1] = compute_scores(data_agent, stakes_agent, states_feat, new_weights[a_idx - 1])
+        means = data_agent.mean(axis=0)
+        stdev = data_agent.std(axis=0)
+        new_weights[a_idx - 1] = set_weights(prev_weights, delta, means, stdev, stakes_agent, states_feat)
+        scores[a_idx - 1] = compute_scores(means, stdev, stakes_agent, states_feat, new_weights[a_idx - 1])
 
     # Find states and save new input files
     state_indices, executors = select_states(scores, stakes, regime, n_output)
