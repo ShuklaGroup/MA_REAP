@@ -50,8 +50,8 @@ def set_parser():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument('-r', '--reset', help="Path to MAREAP reset file (.pkl). This file is created when running the "
-                                              "script for the first time. Some settings are ignored if the "
-                                              "passing a reset file.")
+                                              "script for the first time. Some settings are ignored if passing a "
+                                              "reset file.")
     parser.add_argument('-t', '--topology', help="Path to the topology file. (Ignored if passing reset file.)")
     parser.add_argument('-ft', '--format_traj', help="Format suffix for trajectory files. (Ignored if passing reset "
                                                      "file.)")
@@ -116,21 +116,15 @@ def read_data():
     for a_idx, a_dir in enumerate(agent_dirs):
         round_dirs = natsorted(glob(os.path.join(a_dir, 'round_*')))
         assert (len(round_dirs) == n_rounds)  # Ensures all agents ran the same number of rounds
-        # trajectories.append([])
         for r_idx, r_dir in enumerate(round_dirs):
             traj_dirs = natsorted(glob(os.path.join(r_dir, 'traj_*')))
             n_trajs = len(traj_dirs)
-            # print(f"Detected {n_trajs} trajs in {r_dir}")
-            # trajectories[-1].append([])
             for t_idx, t_dir in enumerate(traj_dirs):
                 feature_files = natsorted(glob(os.path.join(t_dir, '*.npy')))
                 n_files = len(feature_files)
-                # print(f"Detected {n_files} feature files in {t_dir}")
-                # trajectories[-1][-1].append([])
                 for f_idx, f_file in enumerate(feature_files):
                     feats = np.load(f_file)
                     n_frames = feats.shape[0]
-                    # trajectories[-1][-1][-1].append(feats)
                     trajectories.append(feats)
                     frame_indices_map.append((a_idx + 1, r_idx + 1, t_idx + 1, f_idx + 1, n_frames))
     return trajectories, frame_indices_map
