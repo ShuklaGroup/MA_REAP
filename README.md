@@ -13,7 +13,7 @@ If you use this code, make sure to cite:
 
 ## NEW (Jan 2023): CLI to run MA REAP simulations with any MD engine
 
-A Python script (`mareap_sim.py`) with a command line interface is available to simplify the use of MA REAP with arbitrary MD engines (with the condition that the trajectory/coordinate files can be understood by [mdtraj](https://mdtraj.org/1.9.4/load_functions.html)). This script does not run any trajectories, but it generates the input files required to perform a round of simulations. The expected use case is that the user will call this script after each round of simulations to obtain the input files for the following round of adaptive sampling. The file `input_states_for_round_{round #}.csv` specifies the trajectory and frame that was read to obtain the input coordinates. 
+A Python script (`mareap_sim.py`) with a command line interface is available to simplify the use of MA REAP with arbitrary MD engines (with the condition that the trajectory/coordinate files can be understood by [mdtraj](https://mdtraj.org/1.9.4/load_functions.html)). This script does not run any trajectories, but it generates the input files required to perform a round of simulations. The expected use case is that the user will call this script after each round of simulations to obtain the input files for the following round of adaptive sampling.  
 
 To install dependencies, you can use the conda environment file `mareap_sim.yml` (it contains fewer dependencies than `mareap.yml`):
 
@@ -41,7 +41,7 @@ The script will search for trajectory files in its working directory, which must
             |_agent_{P}
 ```
 
-New directories `round_{M+1}` are created under each agent with the corresponding input coordinate files stored in `traj_{#}` subdirectories.
+New directories `round_{M+1}` are created under each agent with the corresponding input coordinate files stored in `traj_{#}` subdirectories. The file `input_states_for_round_{round #}.csv` specifies the trajectory and frame that was read to obtain the input coordinates.
 The user is responsible for extracting the relevant features from the trajectories and store them in the `.npy` format. For instructions on trajectory featurization, [this](https://mdtraj.org/1.9.4/analysis.html) and [this](https://userguide.mdanalysis.org/stable/examples/quickstart.html) might be useful. Multiple clones (i.e., trajectories initialized from the exact same conditions) can be stored under each `traj_{#}` folder, but to make sure that the features are associated to the correct trajectory, it is recommended that the names of the files match. 
 
 The flags that can be set by the user are the following:
