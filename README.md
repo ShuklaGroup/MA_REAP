@@ -75,7 +75,7 @@ The flags that can be set by the user are the following:
                         Regime used to combine rewards from different agents. Default: collaborative. (Ignored if passing reset file.)
 ```
 
-Once a reset file is available, its path should be passed to the `-r` flag and all settings will be set automatically. The user can override flags `-fc`, `-n`, `-o`, and `-c` to accomodate for certain changes.
+Once a reset file is available, its path must be passed to the `-r` flag and all settings will be set automatically. The user can override flags `-fc`, `-n`, `-o`, and `-c` to accomodate for certain changes.
   
 ## Environment setup
 The easiest way to install the required dependencies is through [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html):
