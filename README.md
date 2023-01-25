@@ -47,6 +47,9 @@ The user is responsible for extracting the relevant features from the trajectori
 The flags that can be set by the user are the following:
 
 ```
+usage: python mareap_sim.py [-h] [-r RESET] [-t TOPOLOGY] [-ft FORMAT_TRAJ] [-fc FORMAT_COOR] [-fs FRAME_STRIDE] [-d DELTA] [-w WEIGHTS [WEIGHTS ...]] [-n N_CANDIDATES] [-o N_OUTPUT] [-c CLUSTERS]
+                            [-s {percentage,equal,logistic}] [-sk STAKES_K] [-reg {collaborative,noncollaborative,competitive}]
+                            
 -r RESET, --reset RESET
                         Path to MAREAP reset file (.pkl). This file is created when running the script for the first time. Some settings are ignored if passing a reset file.
   -t TOPOLOGY, --topology TOPOLOGY
