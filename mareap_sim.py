@@ -51,7 +51,7 @@ def set_parser():
     )
     parser.add_argument('-r', '--reset', help="Path to MAREAP reset file (.pkl). This file is created when running the "
                                               "script for the first time. Some settings are ignored if passing a "
-                                              "reset file.")
+                                              "reset file.", default=" ")
     parser.add_argument('-t', '--topology', help="Path to the topology file. (Ignored if passing reset file.)")
     parser.add_argument('-ft', '--format_traj', help="Format suffix for trajectory files. (Ignored if passing reset "
                                                      "file.)")
@@ -470,8 +470,8 @@ def write_reset_file(n_round, topology, format_traj, format_coor, frame_stride, 
 
 
 def main():
-    parser = set_parser()
-    reset_file = read_reset_file(parser.reset)
+    parser = vars(set_parser())
+    reset_file = read_reset_file(parser['reset'])
 
     if reset_file:
         # Check that all settings can be found in reset file
