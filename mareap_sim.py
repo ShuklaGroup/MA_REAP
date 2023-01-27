@@ -11,7 +11,7 @@ from glob import glob
 from collections import Counter
 import numpy as np
 from natsort import natsorted
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.preprocessing import normalize
 from scipy.optimize import minimize
@@ -51,7 +51,7 @@ def set_parser():
     )
     parser.add_argument('-r', '--reset', help="Path to MAREAP reset file (.pkl). This file is created when running the "
                                               "script for the first time. Some settings are ignored if passing a "
-                                              "reset file.", default=" ")
+                                              "reset file.", default="NONE")
     parser.add_argument('-t', '--topology', help="Path to the topology file. (Ignored if passing reset file.)")
     parser.add_argument('-ft', '--format_traj', help="Format suffix for trajectory files. (Ignored if passing reset "
                                                      "file.)")
@@ -152,7 +152,7 @@ def cluster_data(clusters, concat_data):
         Array of featurized trajectories.
     :return: clustering object.
     """
-    return KMeans(n_clusters=clusters, init='k-means++').fit(concat_data)
+    return MiniBatchKMeans(n_clusters=clusters, init='k-means++').fit(concat_data)
 
 
 def define_states_aux(central_frames_indices, frame_stride, frames_indices_map, format_traj):
@@ -258,8 +258,8 @@ def compute_stakes(n_agents, n_candidates, trajectories, frames_indices_map, clu
         agent_idx = f_idx_map[0] - 1
         assert (traj.shape[0] == f_idx_map[4])
         traj_labels = cluster_obj.predict(traj)
-        for clust_idx in least_counts_idx:
-            num_frames[agent_idx, clust_idx] += np.count_nonzero(traj_labels == clust_idx)
+        for i, clust_idx in enumerate(least_counts_idx):
+            num_frames[agent_idx, i] += np.count_nonzero(traj_labels == clust_idx)
     stakes = normalize(num_frames, norm="l1", axis=0)
 
     return compute_stakes_aux(stakes, stakes_method, stakes_k)
@@ -443,7 +443,7 @@ def save_files(selected_states, executors, format_coor, topology, n_round, n_age
 
 
 def write_reset_file(n_round, topology, format_traj, format_coor, frame_stride, delta, weights, n_candidates,
-                     n_output, clusters, stakes_method, stakes_k, regime):
+                     n_output, clusters, stakes_method, stakes_k, regime, scores, stakes, states_feat):
     """
     Save reset file.
 
@@ -463,6 +463,9 @@ def write_reset_file(n_round, topology, format_traj, format_coor, frame_stride, 
         stakes_method=stakes_method,
         stakes_k=stakes_k,
         regime=regime,
+        scores=scores,
+        stakes=stakes,
+        states_feat=states_feat,
     )
 
     with open(f'restart_file_round_{n_round}.pkl', 'wb') as outfile:
@@ -530,9 +533,9 @@ def main():
     # Set new weights and compute scores for each agent
     weights = np.asarray(weights)
     if weights.shape == (n_features,):
-        prev_weights = np.asarray([weights for _ in range(n_agents)])
-        assert (prev_weights.shape == (n_features, n_agents))
-    elif weights.shape == (n_features, n_agents):
+        prev_weights = np.tile(weights, (n_agents, 1))
+        assert (prev_weights.shape == (n_agents, n_features))
+    elif weights.shape == (n_agents, n_features):
         prev_weights = weights
     new_weights = np.empty(prev_weights.shape)
     scores = np.empty((n_agents, n_candidates))
@@ -540,15 +543,16 @@ def main():
         data_agent, stakes_agent = split_agent_data(trajectories, frames_indices_map, stakes, a_idx)
         means = data_agent.mean(axis=0)
         stdev = data_agent.std(axis=0)
-        new_weights[a_idx - 1] = set_weights(prev_weights, delta, means, stdev, stakes_agent, states_feat)
+        new_weights[a_idx - 1] = set_weights(prev_weights[a_idx - 1], delta, means, stdev, stakes_agent, states_feat)
         scores[a_idx - 1] = compute_scores(means, stdev, stakes_agent, states_feat, new_weights[a_idx - 1])
 
     # Find states and save new input files
     state_indices, executors = select_states(scores, stakes, regime, n_output)
-    save_files(states[state_indices], executors, format_coor, topology, n_round, n_agents)
+    selected_states = [states[s] for s in state_indices]
+    save_files(selected_states, executors, format_coor, topology, n_round, n_agents)
     # Write new reset file
     write_reset_file(n_round + 1, topology, format_traj, format_coor, frame_stride, delta, new_weights, n_candidates,
-                     n_output, clusters, stakes_method, stakes_k, regime)
+                     n_output, clusters, stakes_method, stakes_k, regime, scores, stakes, states_feat)
 
 
 if __name__ == '__main__':
