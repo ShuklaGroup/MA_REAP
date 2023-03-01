@@ -479,7 +479,7 @@ def main():
     if reset_file:
         # Check that all settings can be found in reset file
         topology = reset_file['topology']
-        format_traj = reset_file['format_traj']
+        format_traj = parser['format_traj'] if parser['format_traj'] else reset_file['format_traj']
         format_coor = parser['format_coor'] if parser['format_coor'] else reset_file['format_coor']
         frame_stride = reset_file['frame_stride']
         delta = reset_file['delta']
